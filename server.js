@@ -14,6 +14,7 @@ const COLORS = ['#7CFC00', '#00e5ff', '#ff4d6d', '#ffd54a', '#c77dff', '#ff9f1c'
 let foods = [];
 const players = new Map(); // id -> player
 let nextId = 1;
+let tickN = 0;
 
 function spawnFood(n) {
   for (let i = 0; i < n; i++) {
@@ -124,11 +125,11 @@ function tick() {
     .sort((a, b) => b.score - a.score)
     .slice(0, 10);
 
-  // broadcast snapshot (thin segments to save bandwidth)
+  // broadcast snapshot (thin segments; foods only every 3rd tick to save bandwidth)
+  tickN++;
   const snapshot = {
     type: 'state',
     leaderboard,
-    foods: foods.map(f => [Math.round(f.x), Math.round(f.y), Math.round(f.r), f.c]),
     players: list.map(p => ({
       id: p.id, name: p.name, color: p.color,
       score: Math.round(p.score), radius: Math.round(p.radius * 10) / 10,
@@ -136,6 +137,7 @@ function tick() {
       segs: p.segments.filter((_, i) => i % 2 === 0).map(s => [Math.round(s.x), Math.round(s.y)]),
     })),
   };
+  if (tickN % 3 === 0) snapshot.foods = foods.map(f => [Math.round(f.x), Math.round(f.y), Math.round(f.r), f.c]);
   const msg = JSON.stringify(snapshot);
   for (const p of players.values()) {
     if (p.ws.readyState === WebSocket.OPEN) { try { p.ws.send(msg); } catch (e) {} }

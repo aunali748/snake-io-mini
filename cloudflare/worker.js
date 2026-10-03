@@ -29,6 +29,7 @@ export class GameRoom {
     this.foods = [];
     this.nextId = 1;
     this.ticking = false;
+    this.tickN = 0;
     for (let i = 0; i < 450; i++) this.spawnFood();
   }
 
@@ -202,17 +203,21 @@ export class GameRoom {
       .sort((a, b) => b.score - a.score)
       .slice(0, 10);
 
-    const msg = JSON.stringify({
-      type: 'state',
-      leaderboard,
-      foods: this.foods.map(f => [Math.round(f.x), Math.round(f.y), Math.round(f.r), f.c]),
-      players: list.map(p => ({
-        id: p.id, name: p.name, color: p.color,
-        score: Math.round(p.score), radius: Math.round(p.radius * 10) / 10,
-        angle: Math.round(p.angle * 100) / 100,
-        segs: p.segments.filter((_, i) => i % 2 === 0).map(s => [Math.round(s.x), Math.round(s.y)]),
-      })),
-    });
+    const msg = JSON.stringify((()=>{
+      this.tickN++;
+      const s = {
+        type: 'state',
+        leaderboard,
+        players: list.map(p => ({
+          id: p.id, name: p.name, color: p.color,
+          score: Math.round(p.score), radius: Math.round(p.radius * 10) / 10,
+          angle: Math.round(p.angle * 100) / 100,
+          segs: p.segments.filter((_, i) => i % 2 === 0).map(s => [Math.round(s.x), Math.round(s.y)]),
+        })),
+      };
+      if (this.tickN % 3 === 0) s.foods = this.foods.map(f => [Math.round(f.x), Math.round(f.y), Math.round(f.r), f.c]);
+      return s;
+    })());
     for (const ws of this.state.getWebSockets()) {
       try { ws.send(msg); } catch {}
     }

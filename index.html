@@ -272,7 +272,7 @@ function offlineLoop(){
 }
 
 /* ================= ONLINE MODE ================= */
-let sock=null, myId=null, serverState=null, lastInputSent=0, onlineRunning=false, lastSentAngle=0;
+let sock=null, myId=null, serverState=null, lastInputSent=0, onlineRunning=false, lastSentAngle=0, localPlayer=null;
 
 function normUrl(u){
   u=u.trim();
@@ -314,12 +314,14 @@ function playOnline(){
 }
 function myAngle(){
   const me=serverState&&serverState.players.find(p=>p.id===myId);
-  const px=me?me.segs[0][0]:cam.x+W/2, py=me?me.segs[0][1]:cam.y+H/2;
+  const px=localPlayer?localPlayer.x:(me?me.segs[0][0]:cam.x+W/2);
+  const py=localPlayer?localPlayer.y:(me?me.segs[0][1]:cam.y+H/2);
   const h=desiredHeading(px,py);
   return h===null ? lastSentAngle : h;
 }
 function startOnline(){
   mode='online'; onlineRunning=true;
+  localPlayer=new Snake(document.getElementById('nameInput').value||'Player',true,WORLD/2,WORLD/2);
   document.getElementById('overlay').classList.add('hidden');
   const tag=document.getElementById('modeTag');
   tag.textContent='🌐 Online'; tag.classList.remove('hidden');
@@ -333,17 +335,30 @@ function onlineLoop(){
     const a=myAngle(); lastSentAngle=a;
     sock.send(JSON.stringify({type:'input',angle:a,boost:boosting(),snap:isKeySteering()}));
   }
-  if(serverState){
-    const me=serverState.players.find(p=>p.id===myId);
-    if(me){ cam.x+=((me.segs[0][0]-W/2)-cam.x)*0.14; cam.y+=((me.segs[0][1]-H/2)-cam.y)*0.14;
-      document.getElementById('score').textContent=me.score;
-      document.getElementById('len').textContent=me.segs.length;
+  if(localPlayer){
+    localPlayer.update(); // client-side prediction: your snake reacts instantly
+    if(serverState){
+      const me=serverState.players.find(p=>p.id===myId);
+      if(me){
+        // reconcile prediction with the authoritative server position
+        const dx=me.segs[0][0]-localPlayer.x, dy=me.segs[0][1]-localPlayer.y;
+        const d=Math.hypot(dx,dy);
+        if(d>90){ for(const s of localPlayer.segments){ s.x+=dx; s.y+=dy; } localPlayer.x+=dx; localPlayer.y+=dy; }
+        else if(d>10){ const k=0.25; localPlayer.x+=dx*k; localPlayer.y+=dy*k; for(const s of localPlayer.segments){ s.x+=dx*k; s.y+=dy*k; } }
+        if(serverState.foods) foods=serverState.foods.map(f=>({x:f[0],y:f[1],r:f[2],c:f[3],pulse:Math.random()*6.28}));
+        document.getElementById('score').textContent=me.score;
+        document.getElementById('len').textContent=me.segs.length;
+      }
+      cam.x+=((localPlayer.x-W/2)-cam.x)*0.14; cam.y+=((localPlayer.y-H/2)-cam.y)*0.14;
+      drawBackground(); drawFoods(foods);
+      for(const p of serverState.players){
+        if(p.id===myId) continue;
+        drawSnakeBody(p.segs,p.color,p.radius,p.name,p.angle,false);
+      }
+      drawSnakeBody(localPlayer.segments,localPlayer.color,localPlayer.radius,localPlayer.name,localPlayer.angle,true);
+      document.getElementById('board').innerHTML=serverState.leaderboard
+        .map((e,i)=>`${i+1}. ${e.name}${e.id===myId?' (you)':''} — ${e.score}`).join('<br>');
     }
-    drawBackground(); drawFoods(serverState.foods);
-    for(const p of serverState.players)
-      drawSnakeBody(p.segs,p.color,p.radius,p.name,p.angle,p.id===myId);
-    document.getElementById('board').innerHTML=serverState.leaderboard
-      .map((e,i)=>`${i+1}. ${e.name}${e.id===myId?' (you)':''} — ${e.score}`).join('<br>');
   }
   requestAnimationFrame(onlineLoop);
 }
