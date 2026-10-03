@@ -11,6 +11,9 @@
   #hud { position:fixed; top:12px; left:12px; color:#fff; background:rgba(0,0,0,.45); padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.5; backdrop-filter: blur(6px); }
   #hud b { color:#7CFC00; }
   #modeTag { position:fixed; bottom:12px; left:12px; color:#fff; background:rgba(0,0,0,.45); padding:6px 12px; border-radius:999px; font-size:12px; opacity:.8; }
+  #boostBtn{ position:fixed; right:18px; bottom:24px; width:84px; height:84px; border-radius:50%; font-size:32px; border:3px solid rgba(124,252,0,.6); background:rgba(124,252,0,.15); color:#7CFC00; z-index:20; touch-action:none; }
+  #boostBtn:active{ background:rgba(124,252,0,.45); }
+  #game{ touch-action:none; }
   #leaderboard { position:fixed; top:12px; right:12px; color:#fff; background:rgba(0,0,0,.45); padding:10px 14px; border-radius:12px; font-size:13px; min-width:180px; backdrop-filter: blur(6px); }
   #leaderboard h3 { font-size:13px; margin-bottom:6px; color:#ffd54a; }
   #overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; background:rgba(5,7,18,.88); color:#fff; z-index:10; text-align:center; padding:20px; }
@@ -29,9 +32,10 @@
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="hud">Score: <b id="score">0</b><br>Length: <b id="len">10</b><br><span style="opacity:.7;font-size:12px">Move: mouse / arrows / WASD · Boost: click / space</span></div>
+<div id="hud">Score: <b id="score">0</b><br>Length: <b id="len">10</b><br><span style="opacity:.7;font-size:12px">Move: mouse / arrows / WASD / touch-drag · Boost: click / space / ⚡</span></div>
 <div id="leaderboard"><h3>🏆 Leaderboard · Top 10</h3><div id="board"></div></div>
 <div id="modeTag" class="hidden"></div>
+<button id="boostBtn" class="hidden">⚡</button>
 <div id="overlay">
   <h1>SNAKE.IO MINI</h1>
   <p>Eat the glowing orbs, grow longer, dodge other snakes. Hold click or space to boost — but boosting burns length!</p>
@@ -56,18 +60,52 @@ const rand = (a,b)=>a+Math.random()*(b-a);
 const dist2 = (a,b)=>{ const dx=a.x-b.x, dy=a.y-b.y; return dx*dx+dy*dy; };
 const COLORS = ['#7CFC00','#00e5ff','#ff4d6d','#ffd54a','#c77dff','#ff9f1c'];
 
-let mouse={x:W/2,y:H/2,down:false}, keys={};
-let cam={x:WORLD/2-W/2, y:WORLD/2-H/2};
-let mode = null; // 'online' | 'offline'
+let mouse={x:W/2,y:H/2,down:false,moved:false}, keys={};
 
-window.addEventListener('mousemove',e=>{ mouse.x=e.clientX; mouse.y=e.clientY; });
-window.addEventListener('mousedown',()=>mouse.down=true);
-window.addEventListener('mouseup',()=>mouse.down=false);
-window.addEventListener('touchstart',e=>{ const t=e.touches[0]; mouse.x=t.clientX; mouse.y=t.clientY; mouse.down=true; },{passive:true});
-window.addEventListener('touchmove',e=>{ const t=e.touches[0]; mouse.x=t.clientX; mouse.y=t.clientY; },{passive:true});
-window.addEventListener('touchend',()=>mouse.down=false);
+/* ---- unified input: mouse (desktop) + virtual joystick (touch) ---- */
+const IS_TOUCH = (window.matchMedia && matchMedia('(pointer: coarse)').matches) || 'ontouchstart' in window;
+const joy = { id:null, ox:0, oy:0, dx:0, dy:0 }; // virtual joystick state
+let boostTouch=false, boostTouchId=null;
+if(IS_TOUCH) document.getElementById('boostBtn').classList.remove('hidden');
+
+window.addEventListener('mousemove',e=>{ if(IS_TOUCH) return; mouse.x=e.clientX; mouse.y=e.clientY; mouse.moved=true; });
+window.addEventListener('mousedown',()=>{ if(IS_TOUCH) return; mouse.down=true; });
+window.addEventListener('mouseup',()=>{ mouse.down=false; });
+window.addEventListener('touchstart',e=>{
+  for(const t of e.changedTouches){
+    if(t.target && t.target.closest && t.target.closest('#boostBtn')){ boostTouch=true; boostTouchId=t.identifier; continue; }
+    if(joy.id===null){ joy.id=t.identifier; joy.ox=t.clientX; joy.oy=t.clientY; joy.dx=0; joy.dy=0; }
+  }
+},{passive:true});
+window.addEventListener('touchmove',e=>{
+  for(const t of e.changedTouches){
+    if(t.identifier===joy.id){ joy.dx=t.clientX-joy.ox; joy.dy=t.clientY-joy.oy; }
+  }
+},{passive:true});
+function endTouch(e){
+  for(const t of e.changedTouches){
+    if(t.identifier===joy.id){ joy.id=null; /* keep last dx,dy so the snake continues straight */ }
+    if(t.identifier===boostTouchId){ boostTouch=false; boostTouchId=null; }
+  }
+}
+window.addEventListener('touchend',endTouch);
+window.addEventListener('touchcancel',endTouch);
 window.addEventListener('keydown',e=>{ keys[e.key.toLowerCase()]=true; if(e.key===' ') e.preventDefault(); });
 window.addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
+
+// desired heading from current input; null = keep going straight (fixes mobile corner-drift)
+function desiredHeading(px,py){
+  if(keys['arrowup']||keys['w']) return -Math.PI/2;
+  if(keys['arrowdown']||keys['s']) return Math.PI/2;
+  if(keys['arrowleft']||keys['a']) return Math.PI;
+  if(keys['arrowright']||keys['d']) return 0;
+  if(Math.hypot(joy.dx,joy.dy)>14) return Math.atan2(joy.dy,joy.dx); // joystick: drag direction
+  if(!IS_TOUCH && mouse.moved) return Math.atan2((cam.y+(mouse.y-H/2))-py,(cam.x+(mouse.x-W/2))-px);
+  return null;
+}
+function boosting(){ return mouse.down || keys[' '] || boostTouch; }
+let cam={x:WORLD/2-W/2, y:WORLD/2-H/2};
+let mode = null; // 'online' | 'offline'
 
 function drawBackground(){
   ctx.fillStyle='#0b0e1a'; ctx.fillRect(0,0,W,H);
@@ -132,12 +170,9 @@ class Snake {
     if(!this.alive) return;
     let targetAngle=this.angle;
     if(this.isPlayer){
-      if(keys['arrowup']||keys['w']) targetAngle=-Math.PI/2;
-      else if(keys['arrowdown']||keys['s']) targetAngle=Math.PI/2;
-      else if(keys['arrowleft']||keys['a']) targetAngle=Math.PI;
-      else if(keys['arrowright']||keys['d']) targetAngle=0;
-      else targetAngle=Math.atan2((cam.y+(mouse.y-H/2))-this.y,(cam.x+(mouse.x-W/2))-this.x);
-      this.boost=mouse.down||keys[' '];
+      const h=desiredHeading(this.x,this.y);
+      if(h!==null) targetAngle=h;
+      this.boost=boosting();
     } else {
       if(Math.random()<0.02||!this.target||dist2(this.head,this.target)>90000){
         let best=null,bd=1e12;
@@ -225,7 +260,7 @@ function offlineLoop(){
 }
 
 /* ================= ONLINE MODE ================= */
-let sock=null, myId=null, serverState=null, lastInputSent=0, onlineRunning=false;
+let sock=null, myId=null, serverState=null, lastInputSent=0, onlineRunning=false, lastSentAngle=0;
 
 function normUrl(u){
   u=u.trim();
@@ -268,11 +303,8 @@ function playOnline(){
 function myAngle(){
   const me=serverState&&serverState.players.find(p=>p.id===myId);
   const px=me?me.segs[0][0]:cam.x+W/2, py=me?me.segs[0][1]:cam.y+H/2;
-  if(keys['arrowup']||keys['w']) return -Math.PI/2;
-  if(keys['arrowdown']||keys['s']) return Math.PI/2;
-  if(keys['arrowleft']||keys['a']) return Math.PI;
-  if(keys['arrowright']||keys['d']) return 0;
-  return Math.atan2((cam.y+(mouse.y-H/2))-py,(cam.x+(mouse.x-W/2))-px);
+  const h=desiredHeading(px,py);
+  return h===null ? lastSentAngle : h;
 }
 function startOnline(){
   mode='online'; onlineRunning=true;
@@ -286,7 +318,8 @@ function onlineLoop(){
   const now=performance.now();
   if(now-lastInputSent>50&&sock&&sock.readyState===1){
     lastInputSent=now;
-    sock.send(JSON.stringify({type:'input',angle:myAngle(),boost:mouse.down||keys[' ']}));
+    const a=myAngle(); lastSentAngle=a;
+    sock.send(JSON.stringify({type:'input',angle:a,boost:boosting()}));
   }
   if(serverState){
     const me=serverState.players.find(p=>p.id===myId);

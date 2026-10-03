@@ -44,8 +44,8 @@ Alternatives: Railway, Fly.io, or any VPS (`node server.js` behind a reverse pro
 
 ## Controls
 
-- **Move:** mouse / arrow keys / WASD / touch
-- **Boost:** hold click / space / touch
+- **Move:** mouse / arrow keys / WASD / touch-drag (virtual joystick — touch and drag anywhere to steer; lift your finger and the snake keeps going straight)
+- **Boost:** hold click / space / ⚡ button (mobile)
 
 ## Features
 
