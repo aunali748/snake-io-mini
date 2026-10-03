@@ -73,7 +73,8 @@ function tick() {
     let diff = p.inputAngle - p.angle;
     while (diff > Math.PI) diff -= Math.PI * 2;
     while (diff < -Math.PI) diff += Math.PI * 2;
-    p.angle += Math.max(-0.12, Math.min(0.12, diff));
+    const turnRate = p.snapInput ? 0.32 : 0.16; // keyboard snaps, mouse/stick stay smooth
+    p.angle += Math.max(-turnRate, Math.min(turnRate, diff));
 
     p.boost = p.inputBoost && p.segments.length > 10;
     const sp = p.boost ? p.speed * 1.7 : p.speed;
@@ -161,6 +162,7 @@ wss.on('connection', (ws) => {
     } else if (m.type === 'input' && player) {
       player.inputAngle = m.angle;
       player.inputBoost = !!m.boost;
+      player.snapInput = !!m.snap;
     }
   });
 

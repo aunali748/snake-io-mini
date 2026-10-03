@@ -112,6 +112,7 @@ function desiredHeading(px,py){
   return null;
 }
 function boosting(){ return mouse.down || keys[' '] || boostTouch; }
+function isKeySteering(){ return !!(keys['arrowup']||keys['w']||keys['arrowdown']||keys['s']||keys['arrowleft']||keys['a']||keys['arrowright']||keys['d']); }
 let cam={x:WORLD/2-W/2, y:WORLD/2-H/2};
 let mode = null; // 'online' | 'offline'
 
@@ -195,7 +196,8 @@ class Snake {
     }
     let diff=targetAngle-this.angle;
     while(diff>Math.PI) diff-=Math.PI*2; while(diff<-Math.PI) diff+=Math.PI*2;
-    this.angle+=Math.max(-0.12,Math.min(0.12,diff));
+    const turnRate=(this.isPlayer&&isKeySteering())?0.32:0.16; // keyboard snaps, mouse/stick stay smooth
+    this.angle+=Math.max(-turnRate,Math.min(turnRate,diff));
     const sp=this.boost&&this.segments.length>10?this.baseSpeed*1.7:this.baseSpeed;
     this.x=Math.max(20,Math.min(WORLD-20,this.x+Math.cos(this.angle)*sp));
     this.y=Math.max(20,Math.min(WORLD-20,this.y+Math.sin(this.angle)*sp));
@@ -262,7 +264,7 @@ function offlineLoop(){
     snakes.push(new Snake(names[(Math.random()*names.length)|0],false,rand(200,WORLD-200),rand(200,WORLD-200)));
   }
   if(foods.length<300) spawnFood(5);
-  cam.x+=((player.x-W/2)-cam.x)*0.08; cam.y+=((player.y-H/2)-cam.y)*0.08;
+  cam.x+=((player.x-W/2)-cam.x)*0.14; cam.y+=((player.y-H/2)-cam.y)*0.14;
   drawBackground(); drawFoods(foods);
   for(const s of snakes) drawSnakeBody(s.segments,s.color,s.radius,s.name,s.angle,s.isPlayer);
   document.getElementById('board').innerHTML=[...snakes].sort((a,b)=>b.score-a.score).slice(0,10).map((s,i)=>`${i+1}. ${s.name} — ${s.score}`).join('<br>');
@@ -329,11 +331,11 @@ function onlineLoop(){
   if(now-lastInputSent>50&&sock&&sock.readyState===1){
     lastInputSent=now;
     const a=myAngle(); lastSentAngle=a;
-    sock.send(JSON.stringify({type:'input',angle:a,boost:boosting()}));
+    sock.send(JSON.stringify({type:'input',angle:a,boost:boosting(),snap:isKeySteering()}));
   }
   if(serverState){
     const me=serverState.players.find(p=>p.id===myId);
-    if(me){ cam.x+=((me.segs[0][0]-W/2)-cam.x)*0.1; cam.y+=((me.segs[0][1]-H/2)-cam.y)*0.1;
+    if(me){ cam.x+=((me.segs[0][0]-W/2)-cam.x)*0.14; cam.y+=((me.segs[0][1]-H/2)-cam.y)*0.14;
       document.getElementById('score').textContent=me.score;
       document.getElementById('len').textContent=me.segs.length;
     }
