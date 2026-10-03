@@ -1,0 +1,15 @@
+# Cloudflare Workers config for the Snake.io Mini multiplayer server.
+# Deploy with:  npx wrangler login && npx wrangler deploy
+# Free plan is enough; no credit card required.
+
+name = "snake-io-mini"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+[[durable_objects.bindings]]
+name = "GAME_ROOM"
+class_name = "GameRoom"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["GameRoom"]
