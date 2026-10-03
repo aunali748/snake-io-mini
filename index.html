@@ -10,24 +10,39 @@
   #game { display:block; }
   #hud { position:fixed; top:12px; left:12px; color:#fff; background:rgba(0,0,0,.45); padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.5; backdrop-filter: blur(6px); }
   #hud b { color:#7CFC00; }
-  #leaderboard { position:fixed; top:12px; right:12px; color:#fff; background:rgba(0,0,0,.45); padding:10px 14px; border-radius:12px; font-size:13px; min-width:160px; backdrop-filter: blur(6px); }
+  #modeTag { position:fixed; bottom:12px; left:12px; color:#fff; background:rgba(0,0,0,.45); padding:6px 12px; border-radius:999px; font-size:12px; opacity:.8; }
+  #leaderboard { position:fixed; top:12px; right:12px; color:#fff; background:rgba(0,0,0,.45); padding:10px 14px; border-radius:12px; font-size:13px; min-width:180px; backdrop-filter: blur(6px); }
   #leaderboard h3 { font-size:13px; margin-bottom:6px; color:#ffd54a; }
-  #overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; background:rgba(5,7,18,.82); color:#fff; z-index:10; text-align:center; padding:20px; }
+  #overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; background:rgba(5,7,18,.88); color:#fff; z-index:10; text-align:center; padding:20px; }
   #overlay h1 { font-size:42px; margin-bottom:8px; background:linear-gradient(90deg,#7CFC00,#00e5ff); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-  #overlay p { opacity:.8; margin-bottom:18px; max-width:420px; }
-  #overlay button { font-size:18px; padding:12px 34px; border:none; border-radius:999px; cursor:pointer; background:linear-gradient(90deg,#7CFC00,#00e5ff); color:#06210a; font-weight:700; }
+  #overlay p { opacity:.8; margin-bottom:14px; max-width:440px; font-size:14px; }
+  #overlay input { width:280px; max-width:90%; padding:10px 14px; margin:4px; border-radius:10px; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.07); color:#fff; font-size:14px; }
+  #overlay input::placeholder { color:rgba(255,255,255,.4); }
+  .btnrow { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; justify-content:center; }
+  #overlay button { font-size:16px; padding:12px 28px; border:none; border-radius:999px; cursor:pointer; font-weight:700; }
+  #onlineBtn { background:linear-gradient(90deg,#7CFC00,#00e5ff); color:#06210a; }
+  #offlineBtn { background:#2a3350; color:#fff; }
   #overlay button:hover { transform:scale(1.05); }
+  #onlineErr { color:#ff6b6b; font-size:13px; margin-top:8px; min-height:18px; }
   .hidden { display:none !important; }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 <div id="hud">Score: <b id="score">0</b><br>Length: <b id="len">10</b><br><span style="opacity:.7;font-size:12px">Move: mouse / arrows / WASD · Boost: click / space</span></div>
-<div id="leaderboard"><h3>🏆 Leaderboard</h3><div id="board"></div></div>
+<div id="leaderboard"><h3>🏆 Leaderboard · Top 10</h3><div id="board"></div></div>
+<div id="modeTag" class="hidden"></div>
 <div id="overlay">
   <h1>SNAKE.IO MINI</h1>
   <p>Eat the glowing orbs, grow longer, dodge other snakes. Hold click or space to boost — but boosting burns length!</p>
-  <button id="playBtn">▶ Play</button>
+  <input id="nameInput" placeholder="Your name" maxlength="16">
+  <input id="serverInput" placeholder="Server URL (for online play)" value="ws://localhost:3001">
+  <div class="btnrow">
+    <button id="onlineBtn">🌐 Play Online</button>
+    <button id="offlineBtn">🤖 Play Offline (bots)</button>
+  </div>
+  <div id="onlineErr"></div>
+  <p style="font-size:12px;opacity:.55;margin-top:10px">Online needs the game server running — see README for free hosting.</p>
 </div>
 <script>
 const canvas = document.getElementById('game');
@@ -41,186 +56,9 @@ const rand = (a,b)=>a+Math.random()*(b-a);
 const dist2 = (a,b)=>{ const dx=a.x-b.x, dy=a.y-b.y; return dx*dx+dy*dy; };
 const COLORS = ['#7CFC00','#00e5ff','#ff4d6d','#ffd54a','#c77dff','#ff9f1c'];
 
-let foods=[], snakes=[], player, running=false, mouse={x:W/2,y:H/2}, keys={};
-
-function spawnFood(n){ for(let i=0;i<n;i++) foods.push({ x:rand(0,WORLD), y:rand(0,WORLD), r:rand(3,6), c:COLORS[(Math.random()*COLORS.length)|0], pulse:rand(0,6.28) }); }
-
-class Snake {
-  constructor(name, isPlayer, x, y){
-    this.name=name; this.isPlayer=isPlayer;
-    this.x=x; this.y=y; this.angle=rand(0,6.28);
-    this.speed = isPlayer? 2.6 : rand(1.8,2.4);
-    this.baseSpeed = this.speed;
-    this.radius = 10;
-    this.segments=[]; this.score=0;
-    this.color = isPlayer? '#7CFC00' : COLORS[(Math.random()*COLORS.length)|0];
-    this.alive=true; this.boost=false;
-    const len = isPlayer? 12 : (Math.random()*20+8)|0;
-    for(let i=0;i<len;i++) this.segments.push({x:x-Math.cos(this.angle)*i*10, y:y-Math.sin(this.angle)*i*10});
-  }
-  get head(){ return this.segments[0]; }
-  update(){
-    if(!this.alive) return;
-    let targetAngle = this.angle;
-    if(this.isPlayer){
-      if(keys['arrowup']||keys['w']) targetAngle = -Math.PI/2;
-      else if(keys['arrowdown']||keys['s']) targetAngle = Math.PI/2;
-      else if(keys['arrowleft']||keys['a']) targetAngle = Math.PI;
-      else if(keys['arrowright']||keys['d']) targetAngle = 0;
-      else {
-        const wx = this.x - cam.x + (mouse.x - W/2)*1.6;
-        const wy = this.y - cam.y + (mouse.y - H/2)*1.6;
-        // steer toward mouse in world space
-        const sx = cam.x + (mouse.x - W/2);
-        const sy = cam.y + (mouse.y - H/2);
-        targetAngle = Math.atan2(sy - this.y, sx - this.x);
-      }
-      this.boost = mouse.down || keys[' '];
-    } else {
-      // simple AI: seek nearest food, avoid walls
-      if(Math.random()<0.02 || !this.target || dist2(this.head,this.target)>90000){
-        let best=null,bd=1e12;
-        for(const f of foods){ const d=dist2(this.head,f); if(d<bd){bd=d;best=f;} }
-        this.target=best;
-      }
-      if(this.target) targetAngle = Math.atan2(this.target.y-this.y, this.target.x-this.x);
-      if(this.x<200||this.x>WORLD-200||this.y<200||this.y>WORLD-200) targetAngle = Math.atan2(WORLD/2-this.y, WORLD/2-this.x);
-      this.boost = Math.random()<0.01;
-    }
-    let diff = targetAngle - this.angle;
-    while(diff>Math.PI) diff-=Math.PI*2; while(diff<-Math.PI) diff+=Math.PI*2;
-    this.angle += Math.max(-0.12, Math.min(0.12, diff));
-    const sp = this.boost && this.segments.length>10 ? this.baseSpeed*1.7 : this.baseSpeed;
-    this.x += Math.cos(this.angle)*sp; this.y += Math.sin(this.angle)*sp;
-    this.x = Math.max(20,Math.min(WORLD-20,this.x)); this.y = Math.max(20,Math.min(WORLD-20,this.y));
-    this.segments.unshift({x:this.x, y:this.y});
-    const wantLen = 10 + this.score*0.35;
-    while(this.segments.length > wantLen){
-      const tail = this.segments.pop();
-      if(this.boost && Math.random()<0.3) foods.push({x:tail.x+rand(-10,10), y:tail.y+rand(-10,10), r:3, c:this.color, pulse:0});
-    }
-    if(this.boost && this.segments.length>10 && Math.random()<0.1){ this.score=Math.max(0,this.score-1); }
-    // eat food
-    for(let i=foods.length-1;i>=0;i--){
-      const f=foods[i];
-      if(dist2(this.head,f) < (this.radius+f.r+6)*(this.radius+f.r+6)){
-        this.score+=2; foods.splice(i,1);
-        if(this.isPlayer){ document.getElementById('score').textContent=this.score; document.getElementById('len').textContent=this.segments.length|0; }
-      }
-    }
-    this.radius = 8 + Math.min(14, this.segments.length*0.06);
-  }
-  draw(){
-    if(!this.alive) return;
-    // body
-    for(let i=this.segments.length-1;i>=1;i--){
-      const s=this.segments[i]; const t=i/this.segments.length;
-      ctx.beginPath(); ctx.arc(s.x-cam.x, s.y-cam.y, this.radius*(1-t*0.55), 0, 6.283);
-      ctx.fillStyle=this.color; ctx.globalAlpha=0.92; ctx.fill(); ctx.globalAlpha=1;
-    }
-    const h=this.head;
-    ctx.beginPath(); ctx.arc(h.x-cam.x, h.y-cam.y, this.radius+2, 0, 6.283); ctx.fillStyle=this.color; ctx.fill();
-    // eyes
-    const ex=Math.cos(this.angle), ey=Math.sin(this.angle);
-    const px=-ey, py=ex;
-    for(const s of [-1,1]){
-      ctx.beginPath(); ctx.arc(h.x-cam.x+ex*6+px*6*s, h.y-cam.y+ey*6+py*6*s, 4.5, 0, 6.283); ctx.fillStyle='#fff'; ctx.fill();
-      ctx.beginPath(); ctx.arc(h.x-cam.x+ex*8+px*6*s, h.y-cam.y+ey*8+py*6*s, 2.2, 0, 6.283); ctx.fillStyle='#111'; ctx.fill();
-    }
-    if(this.isPlayer || cam.zoomed){
-      ctx.fillStyle='#fff'; ctx.font='12px sans-serif'; ctx.textAlign='center';
-      ctx.fillText(this.name, h.x-cam.x, h.y-cam.y-this.radius-10);
-    }
-  }
-  checkCollision(others){
-    if(!this.alive) return;
-    for(const o of others){
-      if(o===this||!o.alive) continue;
-      for(let i=2;i<o.segments.length;i+=2){
-        const s=o.segments[i];
-        if(dist2(this.head,s) < (this.radius+o.radius*0.7)*(this.radius+o.radius*0.7)){
-          this.die(); return;
-        }
-      }
-    }
-  }
-  die(){
-    this.alive=false;
-    for(let i=0;i<this.segments.length;i+=3){
-      const s=this.segments[i];
-      foods.push({x:s.x+rand(-15,15), y:s.y+rand(-15,15), r:rand(4,7), c:this.color, pulse:0});
-    }
-    if(this.isPlayer) gameOver();
-  }
-}
-
+let mouse={x:W/2,y:H/2,down:false}, keys={};
 let cam={x:WORLD/2-W/2, y:WORLD/2-H/2};
-
-function init(){
-  foods=[]; snakes=[];
-  spawnFood(350);
-  player=new Snake('YOU', true, WORLD/2, WORLD/2);
-  snakes.push(player);
-  const names=['Venom','Slinky','Noodle','Python','Cobra','Wormy','Slyther'];
-  for(let i=0;i<7;i++) snakes.push(new Snake(names[i], false, rand(200,WORLD-200), rand(200,WORLD-200)));
-  cam.x=player.x-W/2; cam.y=player.y-H/2;
-  document.getElementById('score').textContent='0';
-}
-
-function gameOver(){
-  running=false;
-  const ov=document.getElementById('overlay');
-  ov.classList.remove('hidden');
-  ov.querySelector('h1').textContent='GAME OVER';
-  ov.querySelector('p').textContent=`Score: ${player.score} · Length: ${player.segments.length}. One punch wasn't enough this time — try again!`;
-  ov.querySelector('button').textContent='↻ Play Again';
-}
-
-function loop(){
-  if(!running) return;
-  // update
-  for(const s of snakes) s.update();
-  for(const s of snakes) s.checkCollision(snakes);
-  snakes = snakes.filter(s=>s.alive || s.isPlayer);
-  // keep bots topped up
-  const bots = snakes.filter(s=>!s.isPlayer).length;
-  if(bots<6 && Math.random()<0.02){
-    const names=['Venom','Slinky','Noodle','Python','Cobra','Wormy','Slyther'];
-    snakes.push(new Snake(names[(Math.random()*names.length)|0], false, rand(200,WORLD-200), rand(200,WORLD-200)));
-  }
-  if(foods.length<300) spawnFood(5);
-  // camera follows player
-  cam.x += ((player.x-W/2)-cam.x)*0.08;
-  cam.y += ((player.y-H/2)-cam.y)*0.08;
-
-  // draw
-  ctx.fillStyle='#0b0e1a'; ctx.fillRect(0,0,W,H);
-  // grid
-  ctx.strokeStyle='rgba(255,255,255,0.04)'; ctx.lineWidth=1;
-  const gs=100;
-  const ox = -cam.x % gs, oy = -cam.y % gs;
-  ctx.beginPath();
-  for(let x=ox;x<W;x+=gs){ ctx.moveTo(x,0); ctx.lineTo(x,H); }
-  for(let y=oy;y<H;y+=gs){ ctx.moveTo(0,y); ctx.lineTo(W,y); }
-  ctx.stroke();
-  // world border
-  ctx.strokeStyle='rgba(124,252,0,0.35)'; ctx.lineWidth=4;
-  ctx.strokeRect(-cam.x, -cam.y, WORLD, WORLD);
-  // foods
-  const t=performance.now()/300;
-  for(const f of foods){
-    const sx=f.x-cam.x, sy=f.y-cam.y;
-    if(sx<-20||sy<-20||sx>W+20||sy>H+20) continue;
-    const r=f.r+Math.sin(t+f.pulse)*1.2;
-    ctx.beginPath(); ctx.arc(sx,sy,r,0,6.283);
-    ctx.fillStyle=f.c; ctx.shadowColor=f.c; ctx.shadowBlur=12; ctx.fill(); ctx.shadowBlur=0;
-  }
-  for(const s of snakes) s.draw();
-  // leaderboard
-  const top=[...snakes].sort((a,b)=>b.score-a.score).slice(0,7);
-  document.getElementById('board').innerHTML=top.map((s,i)=>`${i+1}. ${s.name} — ${s.score}`).join('<br>');
-  requestAnimationFrame(loop);
-}
+let mode = null; // 'online' | 'offline'
 
 window.addEventListener('mousemove',e=>{ mouse.x=e.clientX; mouse.y=e.clientY; });
 window.addEventListener('mousedown',()=>mouse.down=true);
@@ -231,11 +69,249 @@ window.addEventListener('touchend',()=>mouse.down=false);
 window.addEventListener('keydown',e=>{ keys[e.key.toLowerCase()]=true; if(e.key===' ') e.preventDefault(); });
 window.addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
 
-document.getElementById('playBtn').addEventListener('click',()=>{
+function drawBackground(){
+  ctx.fillStyle='#0b0e1a'; ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='rgba(255,255,255,0.04)'; ctx.lineWidth=1;
+  const gs=100, ox=-cam.x%gs, oy=-cam.y%gs;
+  ctx.beginPath();
+  for(let x=ox;x<W;x+=gs){ ctx.moveTo(x,0); ctx.lineTo(x,H); }
+  for(let y=oy;y<H;y+=gs){ ctx.moveTo(0,y); ctx.lineTo(W,y); }
+  ctx.stroke();
+  ctx.strokeStyle='rgba(124,252,0,0.35)'; ctx.lineWidth=4;
+  ctx.strokeRect(-cam.x,-cam.y,WORLD,WORLD);
+}
+function drawFoods(foods){
+  const t=performance.now()/300;
+  for(const f of foods){
+    const fx=f.x??f[0], fy=f.y??f[1], fr=(f.r??f[2])+Math.sin(t+(f.pulse||0))*1.2, fc=f.c??f[3];
+    const sx=fx-cam.x, sy=fy-cam.y;
+    if(sx<-20||sy<-20||sx>W+20||sy>H+20) continue;
+    ctx.beginPath(); ctx.arc(sx,sy,fr,0,6.283);
+    ctx.fillStyle=fc; ctx.shadowColor=fc; ctx.shadowBlur=12; ctx.fill(); ctx.shadowBlur=0;
+  }
+}
+function drawSnakeBody(segs, color, radius, name, angle, isMe){
+  for(let i=segs.length-1;i>=1;i--){
+    const s=segs[i]; const sx=(s.x??s[0])-cam.x, sy=(s.y??s[1])-cam.y;
+    const t=i/segs.length;
+    ctx.beginPath(); ctx.arc(sx,sy,radius*(1-t*0.55),0,6.283);
+    ctx.fillStyle=color; ctx.globalAlpha=0.92; ctx.fill(); ctx.globalAlpha=1;
+  }
+  const h=segs[0]; const hx=(h.x??h[0])-cam.x, hy=(h.y??h[1])-cam.y;
+  ctx.beginPath(); ctx.arc(hx,hy,radius+2,0,6.283); ctx.fillStyle=color; ctx.fill();
+  const ex=Math.cos(angle), ey=Math.sin(angle), px=-ey, py=ex;
+  for(const s of [-1,1]){
+    ctx.beginPath(); ctx.arc(hx+ex*6+px*6*s, hy+ey*6+py*6*s, 4.5, 0, 6.283); ctx.fillStyle='#fff'; ctx.fill();
+    ctx.beginPath(); ctx.arc(hx+ex*8+px*6*s, hy+ey*8+py*6*s, 2.2, 0, 6.283); ctx.fillStyle='#111'; ctx.fill();
+  }
+  if(name){
+    ctx.fillStyle = isMe ? '#7CFC00' : '#fff';
+    ctx.font='bold 12px sans-serif'; ctx.textAlign='center';
+    ctx.fillText(name, hx, hy-radius-10);
+  }
+}
+
+/* ================= OFFLINE MODE (vs bots) ================= */
+let foods=[], snakes=[], player=null, running=false;
+
+function spawnFood(n){ for(let i=0;i<n;i++) foods.push({ x:rand(0,WORLD), y:rand(0,WORLD), r:rand(3,6), c:COLORS[(Math.random()*COLORS.length)|0], pulse:rand(0,6.28) }); }
+
+class Snake {
+  constructor(name, isPlayer, x, y){
+    this.name=name; this.isPlayer=isPlayer;
+    this.x=x; this.y=y; this.angle=rand(0,6.28);
+    this.speed=2.6; this.baseSpeed=2.6; this.radius=10;
+    this.segments=[]; this.score=0;
+    this.color=isPlayer?'#7CFC00':COLORS[(Math.random()*COLORS.length)|0];
+    this.alive=true; this.boost=false;
+    const len=isPlayer?12:(Math.random()*20+8)|0;
+    for(let i=0;i<len;i++) this.segments.push({x:x-Math.cos(this.angle)*i*10, y:y-Math.sin(this.angle)*i*10});
+  }
+  get head(){ return this.segments[0]; }
+  update(){
+    if(!this.alive) return;
+    let targetAngle=this.angle;
+    if(this.isPlayer){
+      if(keys['arrowup']||keys['w']) targetAngle=-Math.PI/2;
+      else if(keys['arrowdown']||keys['s']) targetAngle=Math.PI/2;
+      else if(keys['arrowleft']||keys['a']) targetAngle=Math.PI;
+      else if(keys['arrowright']||keys['d']) targetAngle=0;
+      else targetAngle=Math.atan2((cam.y+(mouse.y-H/2))-this.y,(cam.x+(mouse.x-W/2))-this.x);
+      this.boost=mouse.down||keys[' '];
+    } else {
+      if(Math.random()<0.02||!this.target||dist2(this.head,this.target)>90000){
+        let best=null,bd=1e12;
+        for(const f of foods){ const d=dist2(this.head,f); if(d<bd){bd=d;best=f;} }
+        this.target=best;
+      }
+      if(this.target) targetAngle=Math.atan2(this.target.y-this.y,this.target.x-this.x);
+      if(this.x<200||this.x>WORLD-200||this.y<200||this.y>WORLD-200) targetAngle=Math.atan2(WORLD/2-this.y,WORLD/2-this.x);
+      this.boost=Math.random()<0.01;
+    }
+    let diff=targetAngle-this.angle;
+    while(diff>Math.PI) diff-=Math.PI*2; while(diff<-Math.PI) diff+=Math.PI*2;
+    this.angle+=Math.max(-0.12,Math.min(0.12,diff));
+    const sp=this.boost&&this.segments.length>10?this.baseSpeed*1.7:this.baseSpeed;
+    this.x=Math.max(20,Math.min(WORLD-20,this.x+Math.cos(this.angle)*sp));
+    this.y=Math.max(20,Math.min(WORLD-20,this.y+Math.sin(this.angle)*sp));
+    this.segments.unshift({x:this.x,y:this.y});
+    const wantLen=10+this.score*0.35;
+    while(this.segments.length>wantLen){
+      const tail=this.segments.pop();
+      if(this.boost&&Math.random()<0.3) foods.push({x:tail.x+rand(-10,10),y:tail.y+rand(-10,10),r:3,c:this.color,pulse:0});
+    }
+    if(this.boost&&this.segments.length>10&&Math.random()<0.1) this.score=Math.max(0,this.score-1);
+    for(let i=foods.length-1;i>=0;i--){
+      const f=foods[i];
+      if(dist2(this.head,f)<(this.radius+f.r+6)*(this.radius+f.r+6)){
+        this.score+=2; foods.splice(i,1);
+        if(this.isPlayer){ document.getElementById('score').textContent=this.score; document.getElementById('len').textContent=this.segments.length|0; }
+      }
+    }
+    this.radius=8+Math.min(14,this.segments.length*0.06);
+  }
+  checkCollision(others){
+    if(!this.alive) return;
+    for(const o of others){
+      if(o===this||!o.alive) continue;
+      for(let i=2;i<o.segments.length;i+=2){
+        const s=o.segments[i];
+        if(dist2(this.head,s)<(this.radius+o.radius*0.7)*(this.radius+o.radius*0.7)){ this.die(); return; }
+      }
+    }
+  }
+  die(){
+    this.alive=false;
+    for(let i=0;i<this.segments.length;i+=3){
+      const s=this.segments[i];
+      foods.push({x:s.x+rand(-15,15),y:s.y+rand(-15,15),r:rand(4,7),c:this.color,pulse:0});
+    }
+    if(this.isPlayer) gameOver();
+  }
+}
+
+function initOffline(){
+  foods=[]; snakes=[]; spawnFood(350);
+  player=new Snake('YOU',true,WORLD/2,WORLD/2); snakes.push(player);
+  const names=['Venom','Slinky','Noodle','Python','Cobra','Wormy','Slyther'];
+  for(let i=0;i<7;i++) snakes.push(new Snake(names[i],false,rand(200,WORLD-200),rand(200,WORLD-200)));
+  cam.x=player.x-W/2; cam.y=player.y-H/2;
+  document.getElementById('score').textContent='0';
+}
+function gameOver(){
+  running=false;
+  const ov=document.getElementById('overlay');
+  ov.classList.remove('hidden');
+  document.querySelector('#overlay h1').textContent='GAME OVER';
+  document.querySelector('#overlay p').textContent=`Score: ${player.score}. One punch wasn't enough this time — try again!`;
+  document.getElementById('onlineBtn').textContent='🌐 Play Online';
+  document.getElementById('offlineBtn').textContent='↻ Play Offline Again';
+}
+function offlineLoop(){
+  if(!running||mode!=='offline') return;
+  for(const s of snakes) s.update();
+  for(const s of snakes) s.checkCollision(snakes);
+  snakes=snakes.filter(s=>s.alive||s.isPlayer);
+  if(snakes.filter(s=>!s.isPlayer).length<6&&Math.random()<0.02){
+    const names=['Venom','Slinky','Noodle','Python','Cobra','Wormy','Slyther'];
+    snakes.push(new Snake(names[(Math.random()*names.length)|0],false,rand(200,WORLD-200),rand(200,WORLD-200)));
+  }
+  if(foods.length<300) spawnFood(5);
+  cam.x+=((player.x-W/2)-cam.x)*0.08; cam.y+=((player.y-H/2)-cam.y)*0.08;
+  drawBackground(); drawFoods(foods);
+  for(const s of snakes) drawSnakeBody(s.segments,s.color,s.radius,s.name,s.angle,s.isPlayer);
+  document.getElementById('board').innerHTML=[...snakes].sort((a,b)=>b.score-a.score).slice(0,10).map((s,i)=>`${i+1}. ${s.name} — ${s.score}`).join('<br>');
+  requestAnimationFrame(offlineLoop);
+}
+
+/* ================= ONLINE MODE ================= */
+let sock=null, myId=null, serverState=null, lastInputSent=0, onlineRunning=false;
+
+function normUrl(u){
+  u=u.trim();
+  if(/^https:\/\//i.test(u)) return 'wss://'+u.slice(8);
+  if(/^http:\/\//i.test(u)) return 'ws://'+u.slice(7);
+  return u;
+}
+function playOnline(){
+  const err=document.getElementById('onlineErr');
+  err.textContent='';
+  const url=normUrl(document.getElementById('serverInput').value||'ws://localhost:3001');
+  const name=document.getElementById('nameInput').value||'Player';
+  err.textContent='Connecting…';
+  try{ sock=new WebSocket(url); }catch(e){ err.textContent='Bad server URL.'; return; }
+
+  sock.onopen=()=>{ sock.send(JSON.stringify({type:'join',name})); };
+  sock.onerror=()=>{ err.textContent='Could not reach server. Is it running? See README.'; };
+  sock.onclose=()=>{
+    if(mode==='online'){ onlineRunning=false; mode=null;
+      document.getElementById('overlay').classList.remove('hidden');
+      document.querySelector('#overlay h1').textContent='DISCONNECTED';
+      document.querySelector('#overlay p').textContent='Lost connection to the server.';
+      document.getElementById('modeTag').classList.add('hidden');
+    }
+  };
+  sock.onmessage=(ev)=>{
+    const m=JSON.parse(ev.data);
+    if(m.type==='welcome'){ myId=m.id; startOnline(); }
+    else if(m.type==='state'){ serverState=m; }
+    else if(m.type==='dead'){
+      const ov=document.getElementById('overlay');
+      ov.classList.remove('hidden');
+      document.querySelector('#overlay h1').textContent='YOU DIED';
+      document.querySelector('#overlay p').textContent=`Score: ${m.score}. Respawning…`;
+      setTimeout(()=>{ if(mode==='online') ov.classList.add('hidden'); },2000);
+    }
+    else if(m.type==='respawn'){ document.getElementById('overlay').classList.add('hidden'); }
+  };
+}
+function myAngle(){
+  const me=serverState&&serverState.players.find(p=>p.id===myId);
+  const px=me?me.segs[0][0]:cam.x+W/2, py=me?me.segs[0][1]:cam.y+H/2;
+  if(keys['arrowup']||keys['w']) return -Math.PI/2;
+  if(keys['arrowdown']||keys['s']) return Math.PI/2;
+  if(keys['arrowleft']||keys['a']) return Math.PI;
+  if(keys['arrowright']||keys['d']) return 0;
+  return Math.atan2((cam.y+(mouse.y-H/2))-py,(cam.x+(mouse.x-W/2))-px);
+}
+function startOnline(){
+  mode='online'; onlineRunning=true;
   document.getElementById('overlay').classList.add('hidden');
-  init(); running=true; loop();
+  const tag=document.getElementById('modeTag');
+  tag.textContent='🌐 Online'; tag.classList.remove('hidden');
+  requestAnimationFrame(onlineLoop);
+}
+function onlineLoop(){
+  if(!onlineRunning||mode!=='online') return;
+  const now=performance.now();
+  if(now-lastInputSent>50&&sock&&sock.readyState===1){
+    lastInputSent=now;
+    sock.send(JSON.stringify({type:'input',angle:myAngle(),boost:mouse.down||keys[' ']}));
+  }
+  if(serverState){
+    const me=serverState.players.find(p=>p.id===myId);
+    if(me){ cam.x+=((me.segs[0][0]-W/2)-cam.x)*0.1; cam.y+=((me.segs[0][1]-H/2)-cam.y)*0.1;
+      document.getElementById('score').textContent=me.score;
+      document.getElementById('len').textContent=me.segs.length;
+    }
+    drawBackground(); drawFoods(serverState.foods);
+    for(const p of serverState.players)
+      drawSnakeBody(p.segs,p.color,p.radius,p.name,p.angle,p.id===myId);
+    document.getElementById('board').innerHTML=serverState.leaderboard
+      .map((e,i)=>`${i+1}. ${e.name}${e.id===myId?' (you)':''} — ${e.score}`).join('<br>');
+  }
+  requestAnimationFrame(onlineLoop);
+}
+
+/* ================= MENU ================= */
+document.getElementById('onlineBtn').addEventListener('click',playOnline);
+document.getElementById('offlineBtn').addEventListener('click',()=>{
+  mode='offline';
+  document.getElementById('overlay').classList.add('hidden');
+  const tag=document.getElementById('modeTag');
+  tag.textContent='🤖 Offline (bots)'; tag.classList.remove('hidden');
+  initOffline(); running=true; offlineLoop();
 });
-init();
 </script>
 </body>
 </html>
