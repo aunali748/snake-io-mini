@@ -96,14 +96,19 @@ window.addEventListener('touchcancel',endTouch);
 window.addEventListener('keydown',e=>{ keys[e.key.toLowerCase()]=true; if(e.key===' ') e.preventDefault(); });
 window.addEventListener('keyup',e=>{ keys[e.key.toLowerCase()]=false; });
 
-// desired heading from current input; null = keep going straight (fixes mobile corner-drift)
+// desired heading from current input; null = keep going straight (no drift when idle)
 function desiredHeading(px,py){
   if(keys['arrowup']||keys['w']) return -Math.PI/2;
   if(keys['arrowdown']||keys['s']) return Math.PI/2;
   if(keys['arrowleft']||keys['a']) return Math.PI;
   if(keys['arrowright']||keys['d']) return 0;
   if(Math.hypot(joy.dx,joy.dy)>14) return Math.atan2(joy.dy,joy.dx); // joystick: drag direction
-  if(!IS_TOUCH && mouse.moved) return Math.atan2((cam.y+(mouse.y-H/2))-py,(cam.x+(mouse.x-W/2))-px);
+  if(!IS_TOUCH && mouse.moved){
+    // steer toward cursor, but only if it's well away from the snake's head —
+    // otherwise an idle cursor would drag the snake into a corner forever
+    const dx=mouse.x-(px-cam.x), dy=mouse.y-(py-cam.y);
+    if(Math.hypot(dx,dy)>48) return Math.atan2(dy,dx);
+  }
   return null;
 }
 function boosting(){ return mouse.down || keys[' '] || boostTouch; }
